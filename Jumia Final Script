@@ -1,0 +1,136 @@
+from selenium import webdriver
+from selenium.webdriver.chrome.options import Options
+from bs4 import BeautifulSoup
+import pandas as pd
+import re
+import time
+from datetime import datetime
+
+# ========================
+# CONFIGURATION
+# ========================
+CATEGORIES = [
+    ("SmartPhones", "https://www.jumia.co.ke/smartphones/"),
+    ("Televisons", "https://www.jumia.co.ke/televisions/"),
+    ("Tablets", "https://www.jumia.co.ke/other-tablets/"),
+    ("Refrigerators", "https://www.jumia.co.ke/refrigerators/"),
+    ("Laptop", "https://www.jumia.co.ke/mlp-laptop/"),
+    ("Audio Speakers", "https://www.jumia.co.ke/home-audio-electronics/")
+]
+
+TIMESTAMP = datetime.now().strftime('%d-%m-%Y')
+FILE_NAME = f"Jumia_products_{TIMESTAMP}"
+FINAL_OUTPUT_FILE = f"{FILE_NAME}.xlsx"
+
+# ========================
+# SELENIUM DRIVER SETUP
+# ========================
+def setup_driver():
+    options = Options()
+    options.add_argument("--start-maximized")
+    options.add_argument("--disable-notifications")
+    options.add_argument("--disable-popup-blocking")
+    driver = webdriver.Chrome(options=options)
+    driver.set_page_load_timeout(180)
+    return driver
+
+# ========================
+# SCRAPING FUNCTION
+# ========================
+def scrape_category(driver, category_name, category_url):
+    print(f"\n🔍 Scraping category: {category_name}")
+    products = []
+    seen_names = set()
+    page_number = 1
+
+    while True:
+        page_url = category_url if page_number == 1 else f"{category_url}?page={page_number}"
+        try:
+            driver.get(page_url)
+        except Exception as e:
+            print(f"⚠️ Error loading page {page_number}: {str(e)} — skipping.")
+            break
+
+        time.sleep(5)
+        soup = BeautifulSoup(driver.page_source, "html.parser")
+        product_cards = soup.select("article.prd")
+
+        if not product_cards:
+            print(f"✅ No more products found on page {page_number}.")
+            break
+
+        print(f"✅ Found {len(product_cards)} products on page {page_number}")
+
+        for card in product_cards:
+            try:
+                name_tag = card.find("h3", class_="name")
+                price_tag = card.find("div", class_="prc")
+
+                name = name_tag.get_text(strip=True) if name_tag else None
+                price = price_tag.get_text(strip=True) if price_tag else None
+
+                # Skip products with missing data
+                if not name or not price:
+                    continue
+
+                # Clean name to remove fluff
+                cleaned_name = re.sub(r"(\+.*)|(\(.*\))|(\[.*\])", "", name, flags=re.IGNORECASE).strip().lower()
+
+                if cleaned_name in seen_names:
+                    continue
+
+                if any(keyword in name.lower() for keyword in ["gift", "bundle", "free", "+", "with", "offer"]):
+                    continue
+
+                seen_names.add(cleaned_name)
+
+                products.append({
+                    "Category": category_name,
+                    "Product Name": name,
+                    "Price": price
+                })
+
+            except Exception as e:
+                print(f"⚠️ Error extracting product: {str(e)}")
+                continue
+
+        page_number += 1
+
+    return products
+
+# ========================
+# MAIN EXECUTION
+# ========================
+def main():
+    driver = setup_driver()
+    all_products = []
+
+    try:
+        for cat_name, cat_url in CATEGORIES:
+            products = scrape_category(driver, cat_name, cat_url)
+            all_products.extend(products)
+
+        if all_products:
+            df = pd.DataFrame(all_products)
+
+            # Drop rows with any NAs just in case
+            df.dropna(inplace=True)
+
+            # Reorder columns: Category first
+            df = df[["Category", "Product Name", "Price"]]
+
+            # Save to a single sheet named after the file (without .xlsx)
+            with pd.ExcelWriter(FINAL_OUTPUT_FILE, engine='openpyxl') as writer:
+                df.to_excel(writer, sheet_name=FILE_NAME[:31], index=False)
+
+            print(f"\n✅ Data saved to Excel file: {FINAL_OUTPUT_FILE} (sheet: {FILE_NAME[:31]})")
+        else:
+            print("⚠️ No products found.")
+
+    finally:
+        driver.quit()
+        print("Browser closed.")
+
+if __name__ == "__main__":
+    main()
+
