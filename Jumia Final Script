@@ -73,6 +73,10 @@ def scrape_category(driver, category_name, category_url):
                 if not name or not price:
                     continue
 
+                # ✅ Clean price → numeric (remove KSh, commas)
+                clean_price = re.sub(r"[^\d.]", "", price)
+                clean_price = float(clean_price) if clean_price else None
+
                 # Clean name to remove fluff
                 cleaned_name = re.sub(r"(\+.*)|(\(.*\))|(\[.*\])", "", name, flags=re.IGNORECASE).strip().lower()
 
@@ -87,7 +91,7 @@ def scrape_category(driver, category_name, category_url):
                 products.append({
                     "Category": category_name,
                     "Product Name": name,
-                    "Price": price
+                    "Price": clean_price
                 })
 
             except Exception as e:
@@ -116,12 +120,12 @@ def main():
             # Drop rows with any NAs just in case
             df.dropna(inplace=True)
 
-            # Reorder columns: Category first
+            # Reorder columns
             df = df[["Category", "Product Name", "Price"]]
 
-            # Save to a single sheet named after the file (without .xlsx)
+            # Save to a single sheet
             with pd.ExcelWriter(FINAL_OUTPUT_FILE, engine='openpyxl') as writer:
-                df.to_excel(writer, sheet_name=FILE_NAME[:31], index=False)
+                df.to_excel(writer, sheet_name="Jumia Products", index=False)
 
             print(f"\n✅ Data saved to Excel file: {FINAL_OUTPUT_FILE} (sheet: {FILE_NAME[:31]})")
         else:
@@ -133,4 +137,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
